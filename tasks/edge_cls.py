@@ -10,7 +10,7 @@ r"""边级任务：关系分类 / 链接存在性（对应 ultralytics ``models/
 3. ``y``/三个 mask 索引的是**边**，这件事由 ``ds.supervision='edge'`` 声明，
    损失那边（:mod:`training.losses`）不需要知道 —— 它只做 ``logits[mask]``。
 
-诊断值必须是标量或数值列表：``run_experiment`` 会把 ``results.json`` 里的
+诊断值必须是标量或数值列表：``run_experiment`` 会将 ``results.json`` 里的
 ``diagnostics`` 逐项 ``float()``，嵌套 dict 会当场 TypeError，所以这里摊平。
 """
 
@@ -24,7 +24,7 @@ from torch import nn
 from config import TrainConfig
 from dataset.base import GraphBundle
 from modules.base import explainable_layers
-from modules.dia.explain import dump_pairings, pairing_report
+from modules.dia import dump_pairings, pairing_report, pairings
 from training.base import DiagFn, TrainHooks
 
 __all__ = ['build_hooks', 'diagnostics_for', 'pairing_diagnostics']
@@ -67,9 +67,6 @@ def pairing_diagnostics(model: nn.Module, ds: GraphBundle,
         if 'gamma_i_mean' in rep:
             gamma.append(float(rep['gamma_i_mean']))
     for q, r in enumerate(pairing_report(model, eps).values()):
-        # 路径名不落进诊断：``results.json`` 那一层会对每个值做 ``float()``，
-        # 字符串会当场 ValueError。顺序本身就是 ``named_modules()`` 序（= 构建序），
-        # 想对上名字去 ``pairings.npz`` 的键里看。
         _flat(f'p{q}_', r, out)
         disjoint.append(float(bool(r['disjoint_U']) and bool(r['disjoint_V'])))
     if skew:
@@ -77,7 +74,6 @@ def pairing_diagnostics(model: nn.Module, ds: GraphBundle,
     if gamma:
         out['gamma_mean'] = sum(gamma) / len(gamma)
     if disjoint:
-        # 分离条件成立的比例：0 = 完全没学到可识别的分解，1 = 每个槽管不相交的维度
         out['disjoint_frac'] = sum(disjoint) / len(disjoint)
     if was_training:
         model.train()
@@ -85,7 +81,6 @@ def pairing_diagnostics(model: nn.Module, ds: GraphBundle,
 
 
 def _pairings(model: nn.Module):
-    from modules.dia.explain import pairings
     return pairings(model)
 
 

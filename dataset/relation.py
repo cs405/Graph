@@ -58,7 +58,7 @@ class RelationBundle(GraphBundle):
 
     # ------------------------------------------------------------------ 契约
     def forward_kwargs(self) -> Dict[str, Any]:
-        """``batch`` 里只放 :data:`modules.dia.edges.BATCH_KEYS` 认识的三个键。
+        """``batch`` 里只放 :data:`utils.graph.BATCH_KEYS` 认识的三个键。
 
         多放一个键（比如顺手把 ``pair_id`` 塞进去）会被 ``unpack_batch`` 当场拒；
         少放一个则是静默少一层信息 —— 所以 ``None`` 也照传，让下游自己决定快路径。
@@ -150,7 +150,7 @@ def make_relation_bundle(num_classes: int = 3, n_per_class: int = 40,
        密度 ``pref_density``）：只有 ``(y_i, y_j)`` 命中偏好的对才可能成为 :math:`r` 的边。
        于是「关系 r 成立吗」等价于「i,j 的类对是否在 pref[r] 里」——
        这正是 DIA 的低秩非负 :math:`W_r=U_rV_r^\top` 该学到的东西
-       （不同关系 ⇒ 不同的列支撑集，可被 :func:`modules.dia.explain.supports_disjoint` 检验）；
+       （不同关系 ⇒ 不同的列支撑集，可被 :func:`modules.dia.supports_disjoint` 检验）；
     3. 最后 ``directed_rel`` 个关系只建单向边：L3 的非对称主体贡献
        （:math:`\alpha_i \ne \alpha_j`）只有在有向关系上才学得到东西，
        全对称的图会让那一层退化成常数 0.5；

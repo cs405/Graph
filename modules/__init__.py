@@ -7,12 +7,12 @@
 * :mod:`modules.base` —— 契约本身：``MODULES`` 注册表、``GraphOp``、``Constraint``、
   ``Regularized``、``Explorable``，以及框架侧用的发现函数；
 * :mod:`modules.oca` —— 自研算子 OCA（含退化到 GAT 的开关
-  :attr:`OCALayer.gat_equivalent`，所以不需要再放一个「退化版 GAT」模块）；
-* :mod:`modules.dia` —— 自研算子 DIA（三层：维度注意力 / 低秩非负配对 / 非对称主导）；
+  :attr:`OCALayer.gat_equivalent`）；
+* :mod:`modules.dia` —— 自研算子 DIA（配置 / 三层组件 / 拼装 / 可解释性出口）；
 * :mod:`modules.convs` —— 能被 ``cfg/models/*.yaml`` 引用的结构层（算子包装 +
-  GAT/GCN/MLP 外基线）；
+  GAT/GCN/MLP 外基线 + DIAConv）；
 * :mod:`modules.neck` —— 多输入融合（``Merge``/``Concat``）；
-* :mod:`modules.head` —— 节点级读出（``Classify``）；边级读出在 :mod:`modules.dia.head`。
+* :mod:`modules.head` —— 读出层（``Classify`` + ``EdgeScore``）。
 
 这里**不堆拓扑**：拓扑在 ``cfg/models/*.yaml`` 里，由 :mod:`model_builder` 展开。
 ``@register_module`` 在 import 时登记，所以只要本包被 import 过，注册表就是满的
@@ -23,11 +23,11 @@ from modules.base import (MODULES, Constraint, Explorable, GraphOp, Regularized,
                           SPEC_BLOCKS, apply_constraints, collect_aux,
                           collect_penalties, explain_report, explainable_layers,
                           register_module)
-from modules.convs import ACTS, GATBlock, GCNBlock, LinearBlock, OCAConv
-from modules.dia import (DIAConfig, DIAConv, DIALayer,
-                         EdgeConditionedDimAttention, EdgeScore,
+from modules.convs import ACTS, DIAConv, GATBlock, GCNBlock, LinearBlock, OCAConv
+from modules.dia import (DIAConfig, DIALayer,
+                         EdgeConditionedDimAttention,
                          LowRankNonNegPairing)
-from modules.head import Classify
+from modules.head import Classify, EdgeScore
 from modules.neck import Concat, Merge
 from modules.oca import OCAConfig, OCALayer
 

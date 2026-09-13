@@ -1,0 +1,44 @@
+# 同骨架 + 算子严格退化为 GAT（docs/OCA.md §三 的七条件）
+#
+# 结构与 oca.yaml **完全相同**（4 尺度 + PANet 融合 + 多尺度读出），只有 oca 这块
+# 开关不同。因此它与 oca.yaml 的差值才是「竞争算子本身」的净贡献 —— 拿它去跟
+# 标准 PyG GAT（cfg/models/gat.yaml，2 层、无融合）比，比的是骨架而不是算子。
+#
+# 七条件：lambda=0 ∧ phi≡0 ∧ alpha=0 ∧ tau=1 ∧ T=0 ∧ 加法式打分 ∧ GAT 式输出
+# 逐元素等价性由 test/test_oca_degeneration.py::test_gat_degeneration_is_exact 钉住
+# （那里直接对拍 OCALayer.gat_equivalent；本文件与它的一致性见
+#  test/test_model_builder.py::test_gat_yaml_matches_gat_equivalent）。
+
+nc: null
+
+scales:
+  n: [0.33, 0.25, 1024]
+  s: [0.33, 0.50, 1024]
+  m: [0.67, 0.75, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.25, 512]
+
+oca:
+  heads: 4
+  T: 0 # 条件 5：不做竞争迭代
+  score_mode: gat # 条件 6：加法式打分
+  use_phi: false # 条件 2：无自身嗓门
+  use_competition: false # 条件 1：lambda := 0
+  use_center_field: false # 条件 3：alpha := 0
+  use_temperature: false # 条件 4：tau := 1
+  out_mode: gat # 条件 7：ELU(agg)，无残差、无 LayerNorm
+
+backbone:
+  - [-1, 1, OCAConv, [64]] # 0
+  - [-1, 1, OCAConv, [64]] # 1
+  - [-1, 1, OCAConv, [64]] # 2
+  - [-1, 1, OCAConv, [64]] # 3
+
+head:
+  - [[2, 3], 1, Merge, [64]] # 4
+  - [[1, 4], 1, Merge, [64]] # 5
+  - [[0, 5], 1, Merge, [64]] # 6
+  - [[5, 6], 1, Merge, [64]] # 7 = D1 + D0
+  - [[4, 7], 1, Merge, [64]] # 8 = D2 + U1
+  - [[3, 8], 1, Merge, [64]] # 9
+  - [[6, 7, 8, 9], 1, Classify, [nc]] # 10

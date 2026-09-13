@@ -1,0 +1,27 @@
+# 外基线：标准 GAT（PyG GATConv）
+#
+# 与 oca_gat.yaml 的区别要说清：这份是「文献里的 GAT」——2 层、无融合、无残差；
+# oca_gat.yaml 是「OCA 骨架 + 逐元素退化成 GAT 的算子」。做算子消融请用后者，
+# 做「与别人的方法比」用这份。
+#
+# 约定差异（易踩）：PyG 的 edge_index 是 [source, target]、在 target 侧聚合；
+# OCA 内部是 row = 中心。基线不做 symmetrize，要求数据已是无向图
+# （dataset/ 出来的数据满足这一点）。
+
+nc: null
+
+scales:
+  n: [0.33, 0.25, 1024]
+  s: [0.33, 0.50, 1024]
+  m: [0.67, 0.75, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.25, 512]
+
+backbone:
+  # args = [c2, heads]；add_self_loops=False 由 modules/convs.py::GATBlock 写死，
+  # 因为 OCA 的中心槽位不进聚合，GAT 开自环会让两边的邻域口径不一致。
+  - [-1, 1, GATConv, [64, 8]] # 0
+  - [-1, 1, GATConv, [64, 8]] # 1
+
+head:
+  - [-1, 1, Classify, [nc]] # 2

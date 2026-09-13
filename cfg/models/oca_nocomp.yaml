@@ -1,0 +1,51 @@
+# 归因对照二：与 oca.yaml **只差一个开关**（use_competition: false），骨架、输出路径
+# （残差 + LayerNorm）、温度、中心场全部保留。
+#
+# 为什么需要它：oca_gat.yaml 是 §3 的「七条件退化」，为了逐元素等价于 GAT，它必须
+# 同时关掉 φ / λ / α / τ / T 并把输出退成 ELU(agg)（**无残差、无 LayerNorm**）。
+# 于是 oca_gat − gat 里混了两件事：4 层无残差的栈本身训不动（chameleon 的选参折上
+# val 0.28，而同档 `oca` 0.54、`gat` 0.73，见 docs/OCA_algorithm.md §9.13），
+# 与「竞争算子在不在」。要干净地量竞争项的净贡献，只能只撤一个开关：
+#   oca − oca_nocomp  = 竞争场的净贡献（其余全同）
+#   oca_nocomp − gat  = 除场以外的全部差别（深度 + 多尺度融合 + 点积打分
+#                       + φ/α/τ + 残差读出），不要只叫它「骨架」
+#
+# 但这个开关撤掉的是**整个场**，不只是 λ：OCALayer.__init__ 里 `if cfg.use_competition:`
+# 让 q_proj 与 w_lambda 同进同出，forward 里 `if cfg.T > 0 and cfg.use_competition:`
+# 让 T 步 PGD 连同中心化一起跳过，于是 s ≡ φ + (1-α)b。参数量差 2,573
+# = 4×(q_proj 272) + (首层 w_lambda 1,433+1) + 3×(16+1)，已在 §6 表旁核过。
+# 若只想把 λ 压成 0 而**保留**场机器（迭代 + 中心化照跑），旋钮是
+# `--oca lambda_bias_init=-20`，不需要新结构表。
+
+nc: null
+
+scales:
+  n: [0.33, 0.25, 1024]
+  s: [0.33, 0.50, 1024]
+  m: [0.67, 0.75, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.25, 512]
+
+oca:
+  heads: 4
+  T: 2
+  beta: 0.5
+  lambda_bias_init: -2.0
+  alpha_bias_init: 0.0
+  center_stat: zscore
+  use_competition: false # 唯一与 oca.yaml 不同的键
+
+backbone:
+  - [-1, 1, OCAConv, [64]] # 0
+  - [-1, 1, OCAConv, [64]] # 1
+  - [-1, 1, OCAConv, [64]] # 2
+  - [-1, 1, OCAConv, [64]] # 3
+
+head:
+  - [[2, 3], 1, Merge, [64]] # 4
+  - [[1, 4], 1, Merge, [64]] # 5
+  - [[0, 5], 1, Merge, [64]] # 6
+  - [[5, 6], 1, Merge, [64]] # 7
+  - [[4, 7], 1, Merge, [64]] # 8
+  - [[3, 8], 1, Merge, [64]] # 9
+  - [[6, 7, 8, 9], 1, Classify, [nc]] # 10

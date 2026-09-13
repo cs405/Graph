@@ -1,0 +1,60 @@
+# DIA 边级结构定义（关系图）—— 最后一行是 EdgeScore，输出 [E, nc]
+#
+# 与 dia.yaml（节点级）的差别只有两处，都在「读出头」上：
+#   1. backbone 只有 2 层（边任务的信号在**边**上，堆 4 层节点尺度没有对应收益）；
+#   2. 收尾不是 Classify（[N,nc]）而是 EdgeScore（[E,nc]）。GraphSequential.level
+#      由最后一行的类属性决定，于是这一张表的 level='edge'，
+#      tasks.Task.check_model 会拿它与 ds.supervision 对齐（对不上就报错，不猜）。
+#
+# 配套数据：cfg/train/dia.yaml 的 dataset.name=relsynth
+#   （dataset/relation.py::make_relation_bundle，n_rel=3 / edge_dim=4 / n_node_types=2）
+# 换成真实图（--dataset dblp-rel，走 relation_from_bundle）时必须同时改三个键：
+#   --dia d_edge=0 n_rel=2 n_node_types=1
+# 少改一个的后果不是崩，是**静默错位**：d_edge 对不上会报错（还好），
+# 但 n_rel 偏大只是白建几套用不到的 U/V，n_node_types 偏大只是类型偏置恒取第 0 行。
+
+nc: null # 边级二分类时由数据注入 nc=1（单 logit，判决走 cfg.task.threshold）
+
+scales:
+  n: [0.33, 0.25, 1024]
+  s: [0.33, 0.50, 1024]
+  m: [0.67, 0.75, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.25, 512]
+
+dia:
+  rank: 8 # k：低秩配对的秩，必须 <= min(d_src, d_dst)
+  hidden: 32 # L1/L3 的 MLP 隐层（边任务的 d 比节点级小，隐层跟着收）
+  d_edge: 4 # = make_relation_bundle 的 edge_dim
+  n_rel: 3 # = make_relation_bundle 的 n_rel（配对矩阵按关系类型各持一份）
+  n_node_types: 2 # = make_relation_bundle 的 n_node_types（L3 的 b_(r_i->r_j)）
+  use_dim_attention: true
+  use_pairing: true
+  use_asymmetric: true
+  nonneg: true
+  project: clamp
+  symmetric_pairing: false # 关系图有向：这一项必须是 false，否则 L3 学不到主导权
+  use_projection: true # EdgeScore 那一行用行内 dict 关掉（见下）
+  n_layers: 1
+  residual: true
+  # 有边级属性（rel/edge_attr）时**必须** false：对称化会改边集，而 rel/edge_attr
+  # 得跟着一起搬 —— 搬的时候必须回答「反向边是什么关系」，那是数据集的语义，
+  # 框架不该猜（modules/dia/edges.py 的模块 docstring 第 1 段）。
+  # make_relation_bundle 建的边集本来就是按关系分别建正反两向的，天然对称且对齐。
+  symmetrize: false
+  gate_bias_init: 0.0
+  return_matrix: false
+  heads: 1
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, DIAConv, [64]] # 0 尺度 f0（1 跳）
+  - [-1, 1, DIAConv, [64]] # 1 尺度 f1（2 跳）
+
+head:
+  - [[0, 1], 1, Merge, [64]] # 2 两个尺度等宽相加（Merge 要求各输入同宽）
+  # 3 = 边级读出。行内 dict {'use_projection': false} 是「在全局 dia 块上追加覆盖」，
+  # 不是整块替换（model_builder.parse_model）：这一行的 EdgeScore 于是直接以
+  # 融合后的维度当「维度槽」（d = dim_in，随 scale 一起变），而 backbone 里的
+  # DIAConv 仍然投影。要读**原始特征**的配对，用 cfg/models/dia_rel_read.yaml。
+  - [-1, 1, EdgeScore, [nc, {use_projection: false}]] # level='edge'，必须是最后一行

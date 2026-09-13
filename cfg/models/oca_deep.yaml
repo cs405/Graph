@@ -1,0 +1,36 @@
+# 深度随 scale 变化的多尺度版本（证明 depth_multiple 真的生效）
+#
+# 每个 stage 写成一行 repeats=2，于是 scale n => 每 stage round(2*0.33)=1 层（共 4 层），
+# scale l => 2 层（共 8 层）。代价：stage 内部的中间层不能被 from 引用（一个节点只有
+# 一个输出编号），所以融合的「尺度」= stage 输出，而不是逐层输出。
+
+nc: null
+
+scales:
+  n: [0.33, 0.25, 1024]
+  s: [0.33, 0.50, 1024]
+  m: [0.67, 0.75, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.25, 512]
+
+oca:
+  heads: 4
+  T: 2
+  beta: 0.5
+  lambda_bias_init: -2.0
+  center_stat: zscore
+
+backbone:
+  - [-1, 2, OCAConv, [64]] # 0 stage-1
+  - [-1, 2, OCAConv, [64]] # 1 stage-2
+  - [-1, 2, OCAConv, [64]] # 2 stage-3
+  - [-1, 2, OCAConv, [64]] # 3 stage-4
+
+head:
+  - [[2, 3], 1, Merge, [64]] # 4
+  - [[1, 4], 1, Merge, [64]] # 5
+  - [[0, 5], 1, Merge, [64]] # 6
+  - [[5, 6], 1, Merge, [64]] # 7 = D1 + D0
+  - [[4, 7], 1, Merge, [64]] # 8 = D2 + U1
+  - [[3, 8], 1, Merge, [64]] # 9
+  - [[6, 7, 8, 9], 1, Classify, [nc]] # 10

@@ -1,0 +1,2 @@
+# 占位文件：让空的 data/ 目录能进版本库（.gitignore 里 !data/.gitkeep 放行它）。
+# 数据本体（*.npz / *.npy / 子目录）一律不跟踪，由 dataset/ 下载或预处理脚本生成。

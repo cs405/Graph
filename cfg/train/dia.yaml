@@ -1,0 +1,55 @@
+# DIA 边级训练配置（配套 cfg/models/dia_rel.yaml + dataset relsynth）
+#
+# 用法：
+#   python train.py --config cfg/train/dia.yaml
+#   python train.py --config cfg/train/dia.yaml --dia use_pairing=false   # 消融
+#   python train.py --config cfg/train/dia.yaml --dataset cora-rel \
+#       --dia d_edge=0 n_rel=2 n_node_types=1                             # 真实图上的边级监督
+#
+# 只写与 cfg/train/default.yaml **不同**的键（config.TrainConfig.from_dict 逐块合并，
+# 没写的字段沿用 dataclass 默认）。要事后追溯生效值以 runs/<name>/train/config_used.yaml 为准。
+
+run:
+  run_name: dia
+  best_metric: val_f1 # 边级二分类的正负例数由 edge_neg_ratio 决定，acc 会被多数类带走
+  dump_gates: false # 门控统计是 OCA 的读数；DIA 的对应物是 dump_pairings
+  dump_pairings: true # 存学到的 U/V/W 到 run_dir/pairings.npz（画热图/写论文表格的输入）
+
+dataset:
+  name: relsynth # dataset/relation.py::make_relation_bundle（多关系 + 边级二分类）
+
+model:
+  spec: cfg/models/dia_rel.yaml
+  scale: n
+  dropout: 0.3 # 边任务的单元数比节点多，正则相应收一点
+  dia: {} # 结构表里已按 relsynth 的 n_rel/d_edge/n_node_types 写好，这里不重复
+
+task:
+  task_type: edge_classification # 写 auto 也会解析到同一个（按 ds.supervision='edge'）
+  threshold: 0.5 # 单 logit 的判决阈值
+  edge_neg_ratio: 1.0 # 负例数 = 1.0 × 正例数（正负均衡，所以 pos_weight 留 0）
+
+loss:
+  loss_type: bce # auto 也会选到它（nc==1）。CE 在 [E,1] 上会把唯一的 logit 当类别 0
+  # 三个 λ 是**起点值，不是调出来的**。量级由 penalties() 的初值反推（relsynth + scale n）：
+  #   sp    ≈ 6 个配对模块 × 2 × 384 元素 × 0.05 ≈ 115  → 0.002 贡献 ~0.23
+  #   orth  ≈ 列范数离 1 的平方和 ≈ 43                → 0.0005 贡献 ~0.02
+  #   gamma ≈ mean(γ) ≈ 0.5                            → 0.01 贡献 ~0.005
+  # 而 BCE 起点是 ln2 ≈ 0.69。所以 sp 是唯一一开始就压得住任务损失的项 ——
+  # 这正是想要的方向（先逼出稀疏支撑集），但换数据集/换 scale 必须按 history 里的
+  # pen_sp / pen_orth / pen_gamma 三条曲线重看量级，不能沿用这三个数。
+  lambda_sp: 0.002
+  lambda_orth: 0.0005
+  lambda_gamma: 0.01
+  # 注意 orth 与 sp 是**拉锯**的：orth 把每列范数推向 1，sp 把所有元素推向 0。
+  # 可识别性（§2.7）要的是「非负 + 列稀疏 + 列分离」，其中「分离」只需要
+  # 支撑集不相交，不需要单位范数。所以 orth 给小值（只为分开列），主要靠 sp。
+  pos_weight: 0.0
+
+optimization:
+  epochs: 200
+  patience: 60
+  lr: 0.01
+  weight_decay: 0.0005
+  grad_clip: 1.0 # U/V 被 clamp 投影，投影次梯度可能很尖；裁一刀让 loss 曲线可读
+  class_weight: false

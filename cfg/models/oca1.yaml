@@ -1,0 +1,29 @@
+# 单尺度对照（docs/OCA.md §六 要求的「OCA-single vs OCA-multi」一行）
+#
+# 与 oca.yaml 的差别只有两处：neck 的 6 个 Merge 全去掉，读出只看最后一层。
+# 融合增益必须这样隔离出来，否则「多尺度」与「参数更多」分不开。
+
+nc: null
+
+scales:
+  n: [0.33, 0.25, 1024]
+  s: [0.33, 0.50, 1024]
+  m: [0.67, 0.75, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.25, 512]
+
+oca:
+  heads: 4
+  T: 2
+  beta: 0.5
+  lambda_bias_init: -2.0
+  alpha_bias_init: 0.0
+  center_stat: zscore
+
+backbone:
+  - [-1, 1, OCAConv, [64]] # 0 第一层（in_dim 由数据集注入）
+  - [-1, 4, OCAConv, [64]] # 1 4 层堆叠：repeats 会乘 depth_multiple，
+  #   scale n => round(4*0.33)=1 层，scale l => 4 层（这份文件才是深度缩放的正确示例）
+
+head:
+  - [-1, 1, Classify, [nc]] # 2

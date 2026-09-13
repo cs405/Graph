@@ -1,0 +1,47 @@
+# DIA 的「可读」边级结构：无 backbone、无投影 —— U 的行**就是原始特征维度**
+#
+# 这张表不为刷分，只为回答一个问题：学到的配对矩阵 :math:`W_r=U_rV_r^\top` 里，
+# 「第 a 行第 b 列」到底是不是「原始特征 a 与原始特征 b 在关系 r 下配对」。
+# 只有 ``use_projection: false`` 时这句话才成立（技术文档 §七 局限 1、
+# modules/dia/config.py 抬头第 3 条）：一旦端点先过 Linear，维度槽就是隐维度，
+# pairing_report 里的下标只能说明稀疏结构，不能说明「哪两个特征在配对」。
+#
+# 代价（务必知道，别拿它的准确率与 dia_rel.yaml 比）：
+#   * 没有消息传递，一条边的分数只由两端**原始特征**决定；
+#   * 维度槽数 = 特征数，rank 必须 <= 特征数（relsynth 的 feat_dim=16）；
+#   * 特征维度很高的真实数据上这张表会很大（U 是 [n_rel, d, k]），只适合小 d。
+#
+# 用法：
+#   python train.py --config cfg/train/dia_read.yaml --dataset relsynth
+#   # 或复用 dia.yaml 的训练配置，只换结构表：
+#   python train.py --config cfg/train/dia.yaml --model cfg/models/dia_rel_read.yaml
+
+nc: null
+
+# 刻意不写 scales：这张表的宽度被 use_projection=false 钉死在特征维度上，
+# 「换 scale 改宽度」对它没有意义（model_builder._scale_of 在没有 scales 时
+# 取 depth=width=1，传进来的 scale='n' 被忽略）。
+
+dia:
+  rank: 4 # 槽位数少一点才好读；上限是特征数（relsynth=16）
+  hidden: 32
+  d_edge: 4 # = make_relation_bundle 的 edge_dim
+  n_rel: 3 # = make_relation_bundle 的 n_rel
+  n_node_types: 2 # = make_relation_bundle 的 n_node_types
+  use_dim_attention: true
+  use_pairing: true
+  use_asymmetric: true
+  nonneg: true # 可识别性三前提之一（另两个是 cfg.loss.lambda_sp / lambda_orth）
+  project: clamp
+  symmetric_pairing: false
+  use_projection: false # 本文件的全部意义就在这一行
+  n_layers: 1
+  residual: true # 只有 DIALayer 内部的 §2.5 更新，这里没有 DIAConv，用不上
+  symmetrize: false # 边级属性存在 => 必须 false（EdgeScore 本来就恒按 false 走）
+  gate_bias_init: 0.0
+  return_matrix: false # 想看 M_ij 的热图再打开（O(E d^2)，relsynth 上可承受）
+  heads: 1
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, EdgeScore, [nc]] # 0 直接在原始特征上打分（level='edge'）

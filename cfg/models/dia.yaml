@@ -1,0 +1,75 @@
+# DIA 图网络结构定义（节点级）—— 与 oca.yaml **同骨架**，只把算子换成 DIAConv
+#
+# 为什么骨架一行不改：docs/维度级可识别注意力机制（DIA）.md §六 要比的是
+# 「维度级配对」与「节点级竞争」这两种算子，不是比谁的网络更深更宽。骨架相同，
+# 参数量才只差在算子内部，OCA − DIA 的差值才能归因到算子本身。
+# （拓扑与 oca.yaml 逐行一致，由 test/test_model_builder.py 的拓扑钉子一起管。）
+#
+# 用法：
+#   model = DIA()                                        # 默认就是本文件（model.DIA_SPEC）
+#   model = DIA('cfg/models/dia.yaml', dia={'rank': 4})   # 覆盖算子超参
+#   python train.py --model cfg/models/dia.yaml --dia use_pairing=false   # 消融
+#
+# 每行 [from, repeats, module, args]，语义与 oca.yaml 完全相同（见该文件抬头注释）。
+
+nc: null # 类别数由数据集在构建时注入
+
+scales:
+  n: [0.33, 0.25, 1024]
+  s: [0.33, 0.50, 1024]
+  m: [0.67, 0.75, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.25, 512]
+
+# 算子级默认超参（= modules/dia/config.py 的 DIAConfig）。
+# cfg/train/*.yaml 的 model.dia 与 CLI 的 --dia 逐键覆盖，优先级：CLI > train cfg > 本文件。
+dia:
+  # ---- 维度 ----
+  rank: 8 # k：低秩配对的秩（技术文档 §2.3）。必须 <= min(d_src, d_dst)
+  hidden: 64 # L1/L3 三个 MLP 的隐层宽度
+  d_edge: 0 # 边特征维度；普通引文/合成图没有边特征，所以是 0
+  n_rel: 1 # 关系类型数；同构图 = 1，此时配对矩阵不按关系分表（快路径）
+  n_node_types: 1 # L3 的类型偏置 b_(r_i->r_j) 尺寸；同构 = 1
+  # ---- 三层开关（消融表 = 这三个键的组合，见 docs/DIA.md §八）----
+  use_dim_attention: true # L1 边条件维度注意力 gamma
+  use_pairing: true # L2 低秩非负配对 W = U V^T
+  use_asymmetric: true # L3 非对称主体贡献 alpha
+  # ---- L2 的约束（可识别性三前提）----
+  nonneg: true # U,V >= 0；关掉之后 §2.7 的分解不再可识别
+  project: clamp # 'relu' 未实现（config.py 会直接抛 NotImplementedError）
+  symmetric_pairing: false # true => s_ij == s_ji，只用来量「非对称值多少分」
+  # ---- 结构 ----
+  use_projection: true # 见下方「可解释性」一段：true 时 U 的行不对应原始特征维度
+  n_layers: 1 # 每行 DIAConv 内部堆几层 DIALayer
+  residual: true # false = 无 skip 的纯 MLP 融合（量残差值多少分）
+  symmetrize: true # 消息传递前 to_undirected；**有边级属性时必须 false**
+  gate_bias_init: 0.0 # gamma 的 sigmoid 前偏置初值（0 => 初始 gamma=0.5，不预设筛选）
+  return_matrix: false # 物化 M_ij（O(E d_i d_j)），只对拍/画图用
+  heads: 1 # >1 未实现（多头维度配对是待办）
+
+# 可解释性（§七 局限 1）：use_projection=true 时 U 的行是 Linear 之后的隐维度，
+# 「第 7 行」不对应任何原始特征，pairing_report 里的维度下标只能说明稀疏结构。
+# 要读「哪两个原始特征在配对」，用 cfg/models/dia_rel_read.yaml（无投影、无 backbone），
+# 或在本文件上 `--dia use_projection=false` 并保证每行 DIAConv 的 c1 == c2
+# （第一行的 c1 是数据集的特征数，所以只有宽度不缩放的结构表能这么写）。
+
+# Backbone：4 个 DIA 层，逐层输出就是一个「尺度」（层数越深感受野越大）
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, DIAConv, [64]] # 0 尺度 f0（1 跳）
+  - [-1, 1, DIAConv, [64]] # 1 尺度 f1（2 跳）
+  - [-1, 1, DIAConv, [64]] # 2 尺度 f2（3 跳）
+  - [-1, 1, DIAConv, [64]] # 3 尺度 f3（4 跳）
+
+# Neck + Head：PANet 式双向融合，与 oca.yaml 逐行相同
+head:
+  # top-down：深 -> 浅
+  - [[2, 3], 1, Merge, [64]] # 4 = f2 + f3
+  - [[1, 4], 1, Merge, [64]] # 5 = f1 + (4)
+  - [[0, 5], 1, Merge, [64]] # 6 = f0 + (5)
+  # bottom-up：浅 -> 深
+  - [[5, 6], 1, Merge, [64]] # 7 = (5) + (6)
+  - [[4, 7], 1, Merge, [64]] # 8 = (4) + (7)
+  - [[3, 8], 1, Merge, [64]] # 9 = f3 + (8)
+  # 多尺度读出：拼接 4 个融合结果
+  - [[6, 7, 8, 9], 1, Classify, [nc]] # 10（level='node'）

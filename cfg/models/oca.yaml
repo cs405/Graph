@@ -1,0 +1,62 @@
+# OCA 图网络结构定义（YAML 驱动，对齐 yolov8 的 cfg/models/yolov8.yaml）
+#
+# 用法：
+#   model = OCA('cfg/models/oca.yaml')                      # 默认 scale='n'
+#   model.train(data='cora', scale='s')                     # 训练时覆盖规模
+#   model = OCA('cfg/models/oca.yaml', oca={'T': 4})        # 覆盖算子超参
+#
+# 每一层用 [from, repeats, module, args] 描述：
+#   from     : 输入来自哪一层的输出，-1 表示上一层；写成列表表示多输入（融合/读出）
+#   repeats  : 该层重复次数（乘以 depth_multiple 后取整，至少 1）
+#   module   : 模块名，须在 model_builder.MODULES 注册表里
+#   args     : args[0] 一般是输出通道 c2（按 width 缩放），其余是模块自己的构造参数
+#              两个例外：Classify 的 args[0] 是类别数（不缩放，写 `nc` 由数据注入），
+#              Concat 不写 args（输出宽度 = 各输入宽度之和，builder 自己推）
+#
+# 图侧与图像侧的唯一差别：每一层都要拿 edge_index，所以前向不是「张量进张量出」，
+# 而是由 model_builder.GraphSequential 把 (x, edge_index) 与按 from 缓存的特征图
+# 一起路由。edge_index 全网共用，不进缓存。
+
+# 参数
+nc: null # 类别数：结构 YAML 里留空，由数据集在构建时注入（同 yolov8 的 data.yaml 覆盖）
+
+# 复合缩放系数：[depth_multiple, width_multiple, max_channels]
+# 注意：本文件的 backbone 每行 repeats 都是 1（多尺度融合要求每个尺度单独编号），
+# 所以 n/s/m/l/x 之间**只差宽度**；要让深度也随 scale 变，见 oca_deep.yaml。
+scales:
+  n: [0.33, 0.25, 1024]
+  s: [0.33, 0.50, 1024]
+  m: [0.67, 0.75, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.25, 512]
+
+# 算子级默认超参（docs/OCA.md §二）。cfg/train/*.yaml 的 model.oca 与 CLI 的
+# --oca 可以逐键覆盖，优先级：CLI > train cfg > 本文件。
+oca:
+  heads: 4
+  T: 2
+  beta: 0.5
+  lambda_bias_init: -2.0 # 默认不竞争，竞争要靠训练挣来
+  alpha_bias_init: 0.0
+  center_stat: zscore
+
+# Backbone：4 个 OCA 层，逐层输出就是一个「尺度」（层数越深感受野越大）
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, OCAConv, [64]] # 0 尺度 f0（1 跳）
+  - [-1, 1, OCAConv, [64]] # 1 尺度 f1（2 跳）
+  - [-1, 1, OCAConv, [64]] # 2 尺度 f2（3 跳）
+  - [-1, 1, OCAConv, [64]] # 3 尺度 f3（4 跳）
+
+# Neck + Head：PANet 式双向融合（拓扑由 test/test_model_builder.py::test_oca_neck_topology_is_pinned 钉住）
+head:
+  # top-down：深 -> 浅
+  - [[2, 3], 1, Merge, [64]] # 4 = f2 + f3
+  - [[1, 4], 1, Merge, [64]] # 5 = f1 + (4)
+  - [[0, 5], 1, Merge, [64]] # 6 = f0 + (5)
+  # bottom-up：浅 -> 深。下标不是笔误：U1 用 D1+D0、U2 用 D2+U1（读法见 docs §六）
+  - [[5, 6], 1, Merge, [64]] # 7 = (5) + (6)
+  - [[4, 7], 1, Merge, [64]] # 8 = (4) + (7)
+  - [[3, 8], 1, Merge, [64]] # 9 = f3 + (8)
+  # 多尺度读出：拼接 4 个融合结果
+  - [[6, 7, 8, 9], 1, Classify, [nc]] # 10

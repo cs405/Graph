@@ -1,0 +1,65 @@
+# 训练超参（对应 config.py 的嵌套 dataclass；未知键会告警并忽略，不会炸）
+#
+# 用法：
+#   OCA('cfg/models/oca.yaml').train(data='cora', epochs=200)   # 不传 config 时就是加载本文件
+#   python train.py --config cfg/train/default.yaml --dataset chameleon --epochs 200
+#
+# 结构（层数/宽度/算子开关）在 cfg/models/*.yaml，这里只管「怎么训、跑在哪」。
+# 每次运行会把实际生效的合并结果快照成 runs/<name>/train/config_used.yaml，
+# 所以这个文件是起点而不是结论 —— 事后追溯以快照为准。
+
+run:
+  run_name: oca # runs/<run_name>/train, train2, ...
+  project: runs
+  device: auto # auto | cpu | cuda | cuda:1
+  seed: 0
+  seeds: [0, 1, 2] # 多种子：单次跑分在异配图上没有意义（std 常 1-3 点）
+  vary_split: false # true = 每个种子重新划分（无官方 split 时才建议开）
+  log_interval: 20 # 每多少个 epoch 打一行
+  best_metric: val_acc # 选 checkpoint 的指标（只能看 val）
+  ckpt_interval: 0 # >0 时每 N 个 epoch 存一份滚动 checkpoint
+  max_ckpt: 5 # checkpoint 保留个数
+  save: true # false = 不建 runs/ 目录（测试、快速 smoke 用）
+  dump_gates: true # 训练结束在 run_dir 里存 gates.npz（画 λ 散点用）
+  dump_pairings: false # true = 额外存 DIA 学到的 U/V/W（参数级，与门控不同）
+
+dataset:
+  name: synth # synth | cora | citeseer | pubmed | chameleon | squirrel | actor | ...
+  root: data
+  split_idx: 0 # WebKB / geom-gcn 的 10 折里取第几折
+  train_per_class: 20 # 仅无官方 split 时生效
+  homophily: 0.3 # 合成图的目标边同质性
+  n_per_class: 60 # 合成图每类节点数
+  fallback_to_synth: false # 真实数据装载失败时退回合成图（结果不可与真实混报）
+
+model:
+  spec: cfg/models/oca.yaml # 结构 YAML；换基线就是改这一行
+  scale: n # n | s | m | l | x（结构 YAML 的 scales 表）
+  dropout: 0.5
+  oca: {} # 覆盖 OCAConfig，如 {T: 4, use_phi: false}；CLI 的 --oca 优先级更高
+  dia: {} # 覆盖 DIAConfig，如 {rank: 4, use_pairing: false}；CLI 的 --dia 优先级更高
+
+task:
+  task_type: auto # auto | node_classification | edge_classification
+  threshold: 0.5 # 单 logit（nc==1）时的判决阈值
+  edge_neg_ratio: 1.0 # 边任务的负例采样比例
+
+loss:
+  loss_type: auto # auto | ce | bce（auto 按数据集的监督层级选）
+  lambda_sp: 0.0 # ||U||_1 + ||V||_1：配对矩阵的列稀疏
+  lambda_orth: 0.0 # ||U^T U - I||_F^2 + ||V^T V - I||_F^2：列分离（可识别性的另一半）
+  lambda_gamma: 0.0 # gamma 的 L1：逐维筛选要真的筛掉东西
+  pos_weight: 0.0 # >0 时给 bce 的正类加权（0 = 不用）
+
+optimization:
+  epochs: 400
+  patience: 100 # val 连续多少轮无提升就停（早停后装回 best 权重）
+  optimizer: adam # adam | adamw | sgd
+  lr: 0.01
+  weight_decay: 0.0005
+  momentum: 0.9 # 仅 sgd 用
+  grad_clip: 0.0 # >0 按总范数裁剪
+  class_weight: false # 类别不均衡时给 CE 加权（w_c ∝ 1/n_c^1.5）
+
+# 注意：以上 lr/epochs 是在**合成图**上能收敛的值。真实数据集必须按 val 重选，
+# 不能沿用（docs/OCA.md §七 有说明）。

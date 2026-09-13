@@ -1,0 +1,24 @@
+# ------------------------------------------------------------------ 数据与产物
+# data/：原始图与预处理产物（.npz/.npy/.rar 常有上百 MB），可由 dataset/ 的脚本与
+#        下载逻辑重新生成。这里用 `data/*` + `!data/.gitkeep` 而不是整目录忽略：
+#        clone 后 config.dataset.root='data' 这个目录要存在，否则装载/下载先要 mkdir。
+# runs/：每次训练的 config_used.yaml / weights/best.pt / gates.npz，是可再生产物，
+#        进版本库会让仓库随实验次数线性膨胀，且 best.pt 是二进制 diff 不了。
+data/*
+!data/.gitkeep
+runs/
+
+# ---------------------------------------------------------------------- Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# ------------------------------------------------------------------ 权重与缓存
+# data/ 与 runs/ 之外的权重、导出的张量同样不进版本库（画图脚本的输入是产物）。
+*.pt
+*.pth
+*.npz
+*.npy
